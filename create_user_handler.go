@@ -3,6 +3,9 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/sshaheen/chirpy/internal/auth"
+	"github.com/sshaheen/chirpy/internal/database"
 )
 
 func (c *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -11,7 +14,8 @@ func (c *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}{}
 
 	decoder := json.NewDecoder(r.Body)
@@ -24,7 +28,16 @@ func (c *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := c.dbQueries.CreateUser(r.Context(), params.Email)
+	params.Password, err = auth.HashPassword(params.Password)
+	if err != nil {
+		errResp := errorResponse{
+			Error: "Could not hash user",
+		}
+		writeJSON(w, 500, errResp)
+		return
+	}
+
+	user, err := c.dbQueries.CreateUser(r.Context(), database.CreateUserParams{Email: params.Email, HashedPassword: params.Password})
 	if err != nil {
 		errResp := errorResponse{
 			Error: "Could not create user",
@@ -34,10 +47,11 @@ func (c *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mappedUser := User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		ID:             user.ID,
+		CreatedAt:      user.CreatedAt,
+		UpdatedAt:      user.UpdatedAt,
+		Email:          user.Email,
+		HashedPassword: user.HashedPassword,
 	}
 
 	writeJSON(w, 201, mappedUser)
