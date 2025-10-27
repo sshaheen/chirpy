@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sshaheen/chirpy/internal/auth"
 	"github.com/sshaheen/chirpy/internal/database"
 )
 
@@ -38,6 +40,27 @@ func (c *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		errResp := errorResponse{
+			Error: "error getting bearer token",
+		}
+		writeJSON(w, 500, errResp)
+		return
+	}
+
+	validatedUserID, err := auth.ValidateJWT(token, c.secret)
+	if err != nil {
+		errResp := errorResponse{
+			Error: fmt.Sprintf("error validating JWT. error: %s", err),
+		}
+		writeJSON(w, http.StatusUnauthorized, errResp)
+		return
+	}
+
+	params.UserID.UUID = validatedUserID
+	params.UserID.Valid = true
+
 	chirp := sanitizeChirp(params.Body)
 
 	if len(chirp) > 140 {
@@ -56,7 +79,7 @@ func (c *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
 	dbResp, err := c.dbQueries.CreateChirp(r.Context(), chirpParams)
 	if err != nil {
 		errResp := errorResponse{
-			Error: "Could not create user",
+			Error: fmt.Sprintf("could not create user. error: %s", err),
 		}
 		writeJSON(w, 500, errResp)
 		return

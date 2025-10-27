@@ -15,8 +15,9 @@ func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type loginData struct {
-		Password string `json:"password"`
-		Email    string `json:"email"`
+		Password         string `json:"password"`
+		Email            string `json:"email"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
 	}
 
 	userData := loginData{}
@@ -31,10 +32,23 @@ func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if userData.ExpiresInSeconds == 0 || userData.ExpiresInSeconds > 3600 {
+		userData.ExpiresInSeconds = 3600
+	}
+
 	user, err := c.dbQueries.GetUserByEmail(r.Context(), userData.Email)
 	if err != nil {
 		errResp := errorResponse{
 			Error: "Failed to get user",
+		}
+		writeJSON(w, 500, errResp)
+		return
+	}
+
+	token, err := auth.MakeJWT(user.ID, c.secret, time.Duration(userData.ExpiresInSeconds)*time.Second)
+	if err != nil {
+		errResp := errorResponse{
+			Error: "Error making JWT",
 		}
 		writeJSON(w, 500, errResp)
 		return
@@ -62,11 +76,13 @@ func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Email     string    `json:"email"`
+		Token     string    `json:"token"`
 	}{
 		user.ID,
 		user.CreatedAt,
 		user.UpdatedAt,
 		user.Email,
+		token,
 	}
 
 	writeJSON(w, http.StatusOK, resData)
