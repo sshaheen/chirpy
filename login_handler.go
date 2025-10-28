@@ -1,12 +1,14 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/sshaheen/chirpy/internal/auth"
+	"github.com/sshaheen/chirpy/internal/database"
 )
 
 func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
@@ -15,9 +17,8 @@ func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type loginData struct {
-		Password         string `json:"password"`
-		Email            string `json:"email"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	userData := loginData{}
@@ -32,10 +33,6 @@ func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if userData.ExpiresInSeconds == 0 || userData.ExpiresInSeconds > 3600 {
-		userData.ExpiresInSeconds = 3600
-	}
-
 	user, err := c.dbQueries.GetUserByEmail(r.Context(), userData.Email)
 	if err != nil {
 		errResp := errorResponse{
@@ -45,10 +42,37 @@ func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := auth.MakeJWT(user.ID, c.secret, time.Duration(userData.ExpiresInSeconds)*time.Second)
+	accessToken, err := auth.MakeJWT(user.ID, c.secret, time.Duration(time.Hour))
 	if err != nil {
 		errResp := errorResponse{
 			Error: "Error making JWT",
+		}
+		writeJSON(w, 500, errResp)
+		return
+	}
+
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		errResp := errorResponse{
+			Error: "error with refresh token",
+		}
+		writeJSON(w, 500, errResp)
+		return
+	}
+
+	refTokParams := database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID:    user.ID,
+		ExpiresAt: time.Now().Add(60 * 24 * time.Hour),
+		RevokedAt: sql.NullTime{},
+	}
+
+	_, err = c.dbQueries.CreateRefreshToken(r.Context(), refTokParams)
+	if err != nil {
+		errResp := errorResponse{
+			Error: "error creating refresh token in db",
 		}
 		writeJSON(w, 500, errResp)
 		return
@@ -72,17 +96,19 @@ func (c *apiConfig) loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resData := struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-		Token     string    `json:"token"`
+		ID           uuid.UUID `json:"id"`
+		CreatedAt    time.Time `json:"created_at"`
+		UpdatedAt    time.Time `json:"updated_at"`
+		Email        string    `json:"email"`
+		AccessToken  string    `json:"token"`
+		RefreshToken string    `json:"refresh_token"`
 	}{
 		user.ID,
 		user.CreatedAt,
 		user.UpdatedAt,
 		user.Email,
-		token,
+		accessToken,
+		refreshToken,
 	}
 
 	writeJSON(w, http.StatusOK, resData)
