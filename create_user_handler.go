@@ -52,6 +52,7 @@ func (c *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:      user.UpdatedAt,
 		Email:          user.Email,
 		HashedPassword: user.HashedPassword,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 
 	writeJSON(w, 201, mappedUser)
